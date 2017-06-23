@@ -20,28 +20,32 @@ class VGDLParser(object):
     verbose = False
 
     @staticmethod
-    def playGame(game_str, map_str, headless = False, persist_movie = False, movie_dir = "./tmpl"):
+    def playGame(game_str, map_str, fnn, headless = False, persist_movie = False, movie_dir = "./tmpl",isScreen = True):
         """ Parses the game and level map strings, and starts the game. """
         g = VGDLParser().parseGame(game_str)
         g.buildLevel(map_str)
         g.uiud = uuid.uuid4()
+        g.setFNN(fnn)
         if(headless):
             g.startGameExternalPlayer(headless, persist_movie, movie_dir )
             #g.startGame(headless,persist_movie)
         else:
-            g.startGame(headless,persist_movie)
-
+            if(isScreen):
+                g.startGame(headless,persist_movie)
+            else:
+                g.startSubjectiveGame()
         return g
 
 
     @staticmethod
-    def playSubjectiveGame(game_str, map_str):
+    def playSubjectiveGame(game_str, map_str, fnn):
         from pybrain.rl.experiments.episodic import EpisodicExperiment
         from interfaces import GameTask
         from subjective import SubjectiveGame
         from agents import InteractiveAgent, UserTiredException
         g = VGDLParser().parseGame(game_str)
         g.buildLevel(map_str)
+        g.setFNN(fnn)
         senv = SubjectiveGame(g, actionDelay=100, recordingEnabled=True)
         task = GameTask(senv)
         iagent = InteractiveAgent()
@@ -152,9 +156,10 @@ class BasicGame(object):
                        }
 
     block_size = 10
-    frame_rate = 20
+    frame_rate = 60
     load_save_enabled = True
     mapString = "1231231231"
+    fnn = ""
 
     def __init__(self, **kwargs):
         from ontology import Immovable, DARKGRAY, MovingAvatar, GOLD
@@ -237,6 +242,8 @@ class BasicGame(object):
         # guarantee that avatar is always visible
         self.sprite_order.remove('avatar')
         self.sprite_order.append('avatar')
+    def setFNN(self, fnn):
+        self.fnn = fnn
 
     def emptyBlocks(self):
         alls = [s for s in self]
@@ -560,6 +567,40 @@ class BasicGame(object):
         pygame.time.wait(50)
         return win, self.score
 
+    def startSubjectiveGame(self):
+        self.reset()
+
+        win = False
+        i = 0
+        while not self.ended:
+            self.time += 1
+            self._clearAll(onscreen=False)
+
+            # termination criteria
+            for t in self.terminations:
+                self.ended, win = t.isDone(self)
+                if self.ended:
+                    break
+            # update sprites
+            for s in self:
+                s.update(self)
+            # handle collision effects
+            self._eventHandling()
+
+            VGDLSprite.dirtyrects = []
+
+
+
+        if win:
+            # winning a game always gives a positive score.
+            #if self.score <= 0:
+                #self.score = 1
+            print "Game won, with score %s" % self.score
+        else:
+            print "Game lost. Score=%s" % self.score
+
+        # pause a few frames for the player to see the final screen.
+        return win, self.score    
 
 
     def getPossibleActions(self):
@@ -641,6 +682,7 @@ class VGDLSprite(object):
     mass     = 1
     physicstype=None
     shrinkfactor=0
+    is_stepBack = False
 
     def __init__(self, pos, size=(10,10), color=None, speed=None, cooldown=None, physicstype=None, **kwargs):
         from ontology import GridPhysics
@@ -668,8 +710,9 @@ class VGDLSprite(object):
         self.lastrect = self.rect
         # no need to redraw if nothing was updated
         self.lastmove += 1
-        if not self.is_static and not self.only_active:
-            self.physics.passiveMovement(self)
+        """if not self.is_static and not self.only_active:
+            self.physics._eventHandling(self)
+        """
 
     def _updatePos(self, orientation, speed=None):
         if speed is None:
@@ -764,8 +807,9 @@ class Termination(object):
     """ Base class for all termination criteria. """
     def isDone(self, game):
         """ returns whether the game is over, with a win/lose flag """
-        from pygame.locals import K_ESCAPE, QUIT
+        return False, None
+        """from pygame.locals import K_ESCAPE, QUIT
         if game.keystate[K_ESCAPE] or pygame.event.peek(QUIT):
             return True, False
         else:
-            return False, None
+            return False, None"""
