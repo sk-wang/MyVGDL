@@ -10,8 +10,9 @@ import pygame
 from tools import triPoints, unitVector, vectNorm, oncePerStep
 from ai import AStarWorld
 import random
-import re
-
+import copy
+from pybrain.tools.shortcuts import buildNetwork
+from pybrain.structure import *
 
 # ---------------------------------------------------------------------
 #     Constants
@@ -70,6 +71,7 @@ class GridPhysics():
         """ Grid physics use Hamming distances. """
         return (abs(r1.top - r2.top)
                 + abs(r1.left - r2.left))
+
 
 class ContinuousPhysics(GridPhysics):
     gravity = 0.
@@ -175,7 +177,7 @@ class SpawnPoint(SpriteProducer):
         self.counter = 0
 
     def update(self, game):
-        if (game.time % self.cooldown == 0 and random() < self.prob):
+        if (game.time % self.cooldown == 0 and random.random() < self.prob):
             game._createSprite([self.stype], (self.rect.left, self.rect.top))
             self.counter += 1
 
@@ -213,9 +215,39 @@ class RandomNPC(VGDLSprite):
     def update(self, game):
         VGDLSprite.update(self, game)
         self.physics.activeMovement(self, choice(BASEDIRS))
-class NNSprite(VGDLSprite):
-    """ theSpriteControlledByNN. """
+#author:Hao Wang
+class RandomNPCHorizontal(VGDLSprite):
+    """ Chooses randomly from all available actions each step. """
     speed = 0.5
+    is_stochastic = True
+
+    def update(self, game):
+        horizontal = [LEFT,RIGHT]
+        VGDLSprite.update(self, game)
+        self.physics.activeMovement(self, choice(horizontal))
+class RandomNPCVertical(VGDLSprite):
+    """ Chooses randomly from all available actions each step. """
+    speed = 0.5
+    is_stochastic = True
+
+    def update(self, game):
+        vertical = [UP,DOWN]
+        VGDLSprite.update(self, game)
+        self.physics.activeMovement(self, choice(vertical))
+class RandomAgent(VGDLSprite):
+    """ Chooses randomly from all available actions each step. """
+    speed = 0.5
+    is_stochastic = True
+
+    def update(self, game):
+        VGDLSprite.update(self, game)
+        self.physics.activeMovement(self, choice(BASEDIRS))
+        game.step = game.step + 1
+class ShootNNSprite(SpriteProducer):
+    """ theshootSpriteControlledByNN. """
+    speed = 0.5
+    isShoot = False
+    lastShoot = -100
     def update(self, game):
         inputs = []
         #print game.sprite_groups['link'][0]
@@ -229,14 +261,25 @@ class NNSprite(VGDLSprite):
         blueInputs = [] 
         greenInputs = [] 
         wallInputs = []
-        group = game.sprite_groups
+        #pop sword and bullet
+        group = copy.copy(game.sprite_groups)
+        if(group['sword'] != None):
+            group.pop('sword')
+        if(group['leftbullet'] != None):
+            group.pop('leftbullet')
+        if(group['rightbullet'] != None):
+            group.pop('rightbullet')
+        if(group['upbullet'] != None):
+            group.pop('upbullet')
+        if(group['downbullet'] != None):
+            group.pop('downbullet')
         for col in range(self.rect[0]/game.block_size - 2,self.rect[0]/game.block_size + 3,1):
             for row in range(self.rect[1]/game.block_size - 2,self.rect[1]/game.block_size + 3,1):
                 flag = False
                 thisSprite = ""
                 distance = (abs(col- self.rect[0]/ game.block_size) + abs(row  - self.rect[1]/ game.block_size))
                 #print col,row,self.rect[0]/game.block_size,self.rect[1]/game.block_size,distance
-                if distance <= 2 and distance !=0:
+                if distance <= 4 and distance !=0:
                     #print "selected"
                     #print col,row,self.rect[0]/game.block_size,self.rect[1]/game.block_size,distance
                     for classes in group:
@@ -267,7 +310,7 @@ class NNSprite(VGDLSprite):
                         greenInputs.append(0)
                         wallInputs.append(1)
                 else:
-                    if distance <= 2 and distance !=0:
+                    if distance <= 4 and distance !=0:
                         redInputs.append(0)
                         blueInputs.append(0)
                         greenInputs.append(0)
@@ -398,13 +441,256 @@ class NNSprite(VGDLSprite):
         inputs.extend(nearGreenInput)
 
         #print len(redInputs),len(blueInputs),len(greenInputs),len(wallInputs),len(nearRedInput),len(nearBlueInput),len(nearRedInput)
-        outputs = game.fnn.activate(inputs)
+        outputs = []
+        if(self.israndom == 1):
+            fnn = buildNetwork(108,10,8,hiddenclass=SigmoidLayer)
+            outputs = fnn.activate(inputs)
+        else:
+            outputs = game.fnn.activate(inputs)
+        best = 0
+        bestoutput = outputs[0]
+        if(self.stype == "nothing"): 
+            for i in range(len(outputs)-4):
+                if outputs[i] > bestoutput:
+                    bestoutput = outputs[i]
+                    best = i
+        else:
+            for i in range(len(outputs)):
+                if outputs[i] > bestoutput:
+                    bestoutput = outputs[i]
+                    best = i
+        if(best >= 0 and best<=3):
+            if(self.ismove == 1):
+                self.physics.activeMovement(self, BASEDIRS[best])
+        else:
+            self.physics.activeMovement(self, (0,0))
+            if(self.stype == "sword" or self.stype == "wall"):
+                if(game.step - self.lastShoot >=self.scooldown):
+                    if(best == 4):
+                        game._createSprite([self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
+                    if(best == 5):
+                        game._createSprite([self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
+                    if(best == 6):
+                        game._createSprite([self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
+                    if(best == 7):
+                        game._createSprite([self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))
+                    self.lastShoot = game.step
+            if(self.stype == "bullet"):
+                if(game.step - self.lastShoot >=self.scooldown):
+                    if(best == 4):
+                        game._createSprite(['left'+self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
+                    if(best == 5):
+                        game._createSprite(['right'+self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
+                    if(best == 6):
+                        game._createSprite(['up'+self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
+                    if(best == 7):
+                        game._createSprite(['down'+self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))    
+                    self.lastShoot = game.step
+        game.step = game.step + 1
+class NNSprite(VGDLSprite):
+    """ theSpriteControlledByNN. """
+    speed = 0.5
+    def update(self, game):
+        inputs = []
+        #print game.sprite_groups['link'][0]
+        VGDLSprite.update(self, game)
+        #neuralBegin
+        key = 0
+        #for weights in game.fnn.params:
+            #game.fnn.params[key] = game.fnn.params[key] + 1
+            #key = key + 1
+        redInputs = [] 
+        blueInputs = [] 
+        greenInputs = [] 
+        wallInputs = []
+        group = game.sprite_groups
+        for col in range(self.rect[0]/game.block_size - 2,self.rect[0]/game.block_size + 3,1):
+            for row in range(self.rect[1]/game.block_size - 2,self.rect[1]/game.block_size + 3,1):
+                flag = False
+                thisSprite = ""
+                distance = (abs(col- self.rect[0]/ game.block_size) + abs(row  - self.rect[1]/ game.block_size))
+                #print col,row,self.rect[0]/game.block_size,self.rect[1]/game.block_size,distance
+                if distance <= 4 and distance !=0:
+                    #print "selected"
+                    #print col,row,self.rect[0]/game.block_size,self.rect[1]/game.block_size,distance
+                    for classes in group:
+                        for sprite in group[classes]:
+                            if (sprite.rect[0] == col * game.block_size and sprite.rect[1] == row * game.block_size):
+                                thisSprite = sprite
+                                #print thisSprite
+                                flag = True
+                if flag == True:
+                    if(thisSprite.name == "red"):
+                        redInputs.append(1)
+                        blueInputs.append(0)
+                        greenInputs.append(0)
+                        wallInputs.append(0)
+                    if(thisSprite.name == "green"):
+                        redInputs.append(0)
+                        blueInputs.append(0)
+                        greenInputs.append(1)
+                        wallInputs.append(0)
+                    if(thisSprite.name == "blue"):
+                        redInputs.append(0)
+                        blueInputs.append(1)
+                        greenInputs.append(0)
+                        wallInputs.append(0)
+                    if(thisSprite.name == "wall"):
+                        redInputs.append(0)
+                        blueInputs.append(0)
+                        greenInputs.append(0)
+                        wallInputs.append(1)
+                else:
+                    if distance <= 4 and distance !=0:
+                        redInputs.append(0)
+                        blueInputs.append(0)
+                        greenInputs.append(0)
+                        wallInputs.append(0)
+        #nearestRed
+        nearestRed = 9999
+        nearestRedSprite = ""
+        for sprite in group['red']:
+            distance = (abs(sprite.rect[0] - self.rect[0]) + abs(sprite.rect[1]  - self.rect[1])) / game.block_size
+            if distance < nearestRed:
+                nearestRedSprite = sprite
+                nearestRed = distance
+                break
+        #nearestBlue
+        nearestBlue = 9999
+        nearestBlueSprite = ""
+        for sprite in group['blue']:
+            distance = (abs(sprite.rect[0] - self.rect[0]) + abs(sprite.rect[1]  - self.rect[1])) / game.block_size
+            if distance < nearestRed:
+                nearestBlueSprite = sprite
+                nearestBlue= distance
+                break
+        nearBlueInput = []
+        #nearestGreen
+        nearestGreen = 9999
+        nearestGreenSprite = ""
+        for sprite in group['green']:
+            distance = (abs(sprite.rect[0] - self.rect[0]) + abs(sprite.rect[1]  - self.rect[1])) / game.block_size
+            if distance < nearestRed:
+                nearestGreenSprite = sprite
+                nearestGreen = distance
+                break
+        nearGreenInput = []
+        #nearestWall
+        nearestWall = 9999
+        nearestWallSprite = ""
+        for sprite in group['wall']:
+            distance = (abs(sprite.rect[0] - self.rect[0]) + abs(sprite.rect[1]  - self.rect[1])) / game.block_size
+            if distance < nearestRed:
+                nearestWallSprite = sprite
+                nearestWall = distance
+                break
+        nearWallInput = []    
+        # nearInput
+        if nearestRedSprite != "":
+            if(nearestRedSprite.rect[0] - self.rect[0] > 0):
+                if(abs(nearestRedSprite.rect[0] - self.rect[0]) > abs(nearestRedSprite.rect[1] - self.rect[1])):
+                        nearRedInput = [0,0,0,1]
+                else:
+                    if(nearestRedSprite.rect[1] - self.rect[1] > 0):
+                        nearRedInput = [1,0,0,0]
+                    else:
+                        nearRedInput = [0,0,1,0]
+            else:
+                if(abs(nearestRedSprite.rect[0] - self.rect[0]) > abs(nearestRedSprite.rect[1] - self.rect[1])):
+                        nearRedInput = [0,1,0,0]
+                else:
+                    if(nearestRedSprite.rect[1] - self.rect[1] > 0):
+                        nearRedInput = [1,0,0,0]
+                    else:
+                        nearRedInput = [0,0,1,0]
+        else:
+            nearRedInput = [0,0,0,0]
+        if nearestGreenSprite != "":
+            if(nearestGreenSprite.rect[0] - self.rect[0] > 0):
+                if(abs(nearestGreenSprite.rect[0] - self.rect[0]) > abs(nearestGreenSprite.rect[1] - self.rect[1])):
+                        nearGreenInput = [0,0,0,1]
+                else:
+                    if(nearestGreenSprite.rect[1] - self.rect[1] > 0):
+                        nearGreenInput = [1,0,0,0]
+                    else:
+                        nearGreenInput = [0,0,1,0]
+            else:
+                if(abs(nearestGreenSprite.rect[0] - self.rect[0]) > abs(nearestGreenSprite.rect[1] - self.rect[1])):
+                        nearGreenInput = [0,1,0,0]
+                else:
+                    if(nearestGreenSprite.rect[1] - self.rect[1] > 0):
+                        nearGreenInput = [1,0,0,0]
+                    else:
+                        nearGreenInput = [0,0,1,0]    
+        else:
+            nearGreenInput = [0,0,0,0]
+        if nearestBlueSprite != "":
+            if(nearestBlueSprite.rect[0] - self.rect[0] > 0):
+                if(abs(nearestBlueSprite.rect[0] - self.rect[0]) > abs(nearestBlueSprite.rect[1] - self.rect[1])):
+                        nearBlueInput = [0,0,0,1]
+                else:
+                    if(nearestBlueSprite.rect[1] - self.rect[1] > 0):
+                        nearBlueInput = [1,0,0,0]
+                    else:
+                        nearBlueInput = [0,0,1,0]
+            else:
+                if(abs(nearestBlueSprite.rect[0] - self.rect[0]) > abs(nearestBlueSprite.rect[1] - self.rect[1])):
+                        nearBlueInput = [0,1,0,0]
+                else:
+                    if(nearestBlueSprite.rect[1] - self.rect[1] > 0):
+                        nearBlueInput = [1,0,0,0]
+                    else:
+                        nearBlueInput = [0,0,1,0]
+        else:
+            nearBlueInput = [0,0,0,0]
+        if nearestWallSprite != "":
+            if(nearestWallSprite.rect[0] - self.rect[0] > 0):
+                if(abs(nearestWallSprite.rect[0] - self.rect[0]) > abs(nearestWallSprite.rect[1] - self.rect[1])):
+                        nearWallInput = [0,0,0,1]
+                else:
+                    if(nearestWallSprite.rect[1] - self.rect[1] > 0):
+                        nearWallInput = [1,0,0,0]
+                    else:
+                        nearWallInput = [0,0,1,0]
+            else:
+                if(abs(nearestWallSprite.rect[0] - self.rect[0]) > abs(nearestWallSprite.rect[1] - self.rect[1])):
+                        nearWallInput = [0,1,0,0]
+                else:
+                    if(nearestWallSprite.rect[1] - self.rect[1] > 0):
+                        nearWallInput = [1,0,0,0]
+                    else:
+                        nearWallInput = [0,0,1,0]  
+        else:
+            nearWallInput = [0,0,0,0]  
+        #print redInputs,blueInputs,greenInputs,wallInputs,nearRedInput,nearBlueInput,nearGreenInput,nearWallInput   
+        inputs.extend(redInputs)
+        inputs.extend(blueInputs)
+        inputs.extend(greenInputs)
+        inputs.extend(wallInputs)
+        inputs.extend(nearRedInput)
+        inputs.extend(nearBlueInput)
+        inputs.extend(nearGreenInput)
+        #print len(redInputs),len(blueInputs),len(greenInputs),len(wallInputs),len(nearRedInput),len(nearBlueInput),len(nearRedInput)
+        outputs = []
+        if(self.israndom == 1):
+            fnn = buildNetwork(108,10,8,hiddenclass=SigmoidLayer)
+            outputs = fnn.activate(inputs)
+        else:
+            outputs = game.fnn.activate(inputs)
         best = 0
         bestoutput = outputs[0] 
-        for i in range(len(outputs)):
+        for i in range(len(outputs) - 4):
             if outputs[i] > bestoutput:
+                bestoutput = outputs[i]
                 best = i
-        self.physics.activeMovement(self, BASEDIRS[best])
+        if(best >= 0 and best<=3):
+            self.physics.activeMovement(self, BASEDIRS[best])
+        game.step = game.step + 1
+class Bullet(VGDLSprite):
+    def update(self, game):
+        #print self.orientation
+        VGDLSprite.update(self, game)
+        self.physics.activeMovement(self, self.orientation)
 class OrientedSprite(VGDLSprite):
     """ A sprite that maintains the current orientation. """
     draw_arrow = False
@@ -454,7 +740,7 @@ class WalkJumper(Walker):
     strength = 10
     def update(self, game):
         if self.lastdirection[0] == 0:
-            if self.prob < random():
+            if self.prob < random.random():
                 self.physics.activeMovement(self, (0, -self.strength))
         Walker.update(self, game)
 
@@ -901,7 +1187,14 @@ class Timeout(Termination):
         self.win = win
 
     def isDone(self, game):
-        if game.time >= self.limit:
+        """if(game.isSubjective == False):
+            if game.time >= self.limit:
+                return True, self.win
+            else:
+                return False, None
+        else:
+        """
+        if game.step >= self.limit:
             return True, self.win
         else:
             return False, None
@@ -960,14 +1253,24 @@ class LinkDead(Termination):
 # ---------------------------------------------------------------------
 #     Effect types (invoked after an event).
 # ---------------------------------------------------------------------
-def killSprite(sprite, partner, game, score=0):
+def killSprite(sprite, partner, game, score=0,sdam=10,pdam=10):
     """ Kill command """
-    game.kill_list.append(sprite)
+    #game.kill_list.append(sprite)
+    sprite.hp = sprite.hp - sdam
     game.score = game.score + score
 
-def killPartner(sprite, partner, game, score=0):
+def killPartner(sprite, partner, game, score=0,sdam=10,pdam=10):
     """ Kill command """
-    game.kill_list.append(partner)
+    #game.kill_list.append(partner)
+    partner.hp = partner.hp - pdam
+    game.score = game.score + score
+
+def killBoth(sprite, partner, game, score=0,sdam=10,pdam=10):
+    """ Kill command """
+    #game.kill_list.append(sprite)
+    #game.kill_list.append(partner)
+    sprite.hp = sprite.hp - sdam
+    partner.hp = partner.hp - pdam
     game.score = game.score + score
 
 def cloneSprite(sprite, partner, game):
@@ -1166,52 +1469,77 @@ def teleportToExit(sprite, partner, game):
     sprite.lastmove = 0
 
 #@author: Hao Wang
-def teleportPartner(sprite, partner, game, score=0):
+def no(sprite, partner, game, score=0,sdam=10,pdam=10):
+    game.score = game.score + score
+def teleportPartner(sprite, partner, game, score=0,sdam=10,pdam=10):
     level = game.mapString
     level.replace('\n','')
     level_list = list(level)
+    group = game.sprite_groups
     for i in range(999999):
         randomX = int(random.uniform(0, game.width))
         randomY = int(random.uniform(0, game.height))
-        if(level_list[randomY * (game.width + 1) + (randomX + 1)] == " "):
+        flag = False
+        for classes in group:
+            for sprite in group[classes]:
+                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+                        flag = True
+        if(flag == False):
             break
     partner.rect = pygame.Rect(( randomX * game.block_size,randomY * game.block_size),(game.block_size,game.block_size))
     partner.update
     game.score = game.score + score
 
-def teleportSprite(sprite, partner, game, score=0):
+def teleportSprite(sprite, partner, game, score=0,sdam=10,pdam=10):
     level = game.mapString
     level.replace('\n','')
     level_list = list(level)
+    group = game.sprite_groups
     for i in range(999999):
         randomX = int(random.uniform(0, game.width))
         randomY = int(random.uniform(0, game.height))
-        if(level_list[randomY * (game.width + 1) + (randomX + 1)] == " "):
+        flag = False
+        for classes in group:
+            for sprite in group[classes]:
+                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+                        flag = True
+        if(flag == False):
             break
     sprite.rect = pygame.Rect(( randomX * game.block_size,randomY * game.block_size),(game.block_size,game.block_size))
     sprite.update
     game.score = game.score + score
 
-def teleportBoth(sprite, partner, game, score=0):
+def teleportBoth(sprite, partner, game, score=0,sdam=10,pdam=10):
     level = game.mapString
     level.replace('\n','')
     level_list = list(level)
+    group = game.sprite_groups
     for i in range(999999):
         randomX = int(random.uniform(0, game.width))
         randomY = int(random.uniform(0, game.height))
-        if(level_list[randomY * (game.width + 1) + (randomX + 1)] == " "):
+        flag = False
+        for classes in group:
+            for sprite in group[classes]:
+                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+                        flag = True
+        if(flag == False):
             break
     sprite.rect = pygame.Rect(( randomX * game.block_size,randomY * game.block_size),(game.block_size,game.block_size))
     sprite.update
+    group = game.sprite_groups
     level = game.mapString
     level.replace('\n','')
     level_list = list(level)
     for i in range(999999):
         randomX = int(random.uniform(0, game.width))
         randomY = int(random.uniform(0, game.height))
-        if(level_list[randomY * (game.width + 1) + (randomX + 1)] == " "):
+        flag = False
+        for classes in group:
+            for sprite in group[classes]:
+                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+                        flag = True
+        if(flag == False):
             break
-    print randomX,randomY,game.height
     partner.rect = pygame.Rect(( randomX * game.block_size,randomY * game.block_size),(game.block_size,game.block_size))
     partner.update
     game.score = game.score + score

@@ -20,7 +20,7 @@ class VGDLParser(object):
     verbose = False
 
     @staticmethod
-    def playGame(game_str, map_str, fnn, headless = False, persist_movie = False, movie_dir = "./tmpl",isScreen = True):
+    def playGame(game_str, map_str, fnn=False, headless = False, persist_movie = False, movie_dir = "./tmpl",isScreen = True):
         """ Parses the game and level map strings, and starts the game. """
         g = VGDLParser().parseGame(game_str)
         g.buildLevel(map_str)
@@ -32,8 +32,10 @@ class VGDLParser(object):
         else:
             if(isScreen):
                 g.startGame(headless,persist_movie)
+                g.isSubjective = False
             else:
                 g.startSubjectiveGame()
+                g.isSubjective = True
         return g
 
 
@@ -156,10 +158,12 @@ class BasicGame(object):
                        }
 
     block_size = 10
-    frame_rate = 60
+    frame_rate = 20
     load_save_enabled = True
     mapString = "1231231231"
     fnn = ""
+    step = 0
+    isSubjective = False
 
     def __init__(self, **kwargs):
         from ontology import Immovable, DARKGRAY, MovingAvatar, GOLD
@@ -195,6 +199,7 @@ class BasicGame(object):
         self.reset()
 
     def reset(self):
+        self.step = 0
         self.score = 0
         self.time = 0
         self.ended = False
@@ -684,6 +689,7 @@ class VGDLSprite(object):
     shrinkfactor=0
     is_stepBack = False
 
+    hp=10
     def __init__(self, pos, size=(10,10), color=None, speed=None, cooldown=None, physicstype=None, **kwargs):
         from ontology import GridPhysics
         self.rect = pygame.Rect(pos, size)
@@ -706,13 +712,14 @@ class VGDLSprite(object):
         self.resources = defaultdict(lambda: 0)
 
     def update(self, game):
+        if self.hp <= 0:
+            game.kill_list.append(self)
         """ The main place where subclasses differ. """
         self.lastrect = self.rect
         # no need to redraw if nothing was updated
         self.lastmove += 1
-        """if not self.is_static and not self.only_active:
-            self.physics._eventHandling(self)
-        """
+        if not self.is_static and not self.only_active:
+            self.physics.passiveMovement(self)
 
     def _updatePos(self, orientation, speed=None):
         if speed is None:
@@ -813,3 +820,6 @@ class Termination(object):
             return True, False
         else:
             return False, None"""
+
+class HaoQuest(object):
+    """ Abstract superclass of all quests. """
