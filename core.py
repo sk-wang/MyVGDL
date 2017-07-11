@@ -741,7 +741,10 @@ class VGDLSprite(object):
 
     def _draw(self, game):
         from ontology import LIGHTGREEN
+        myfont = pygame.font.SysFont("monospace", 15)
         screen = game.screen
+        label = myfont.render(str(game.score), 1, (255,255,255))
+        screen.blit(label, (0,0))
         if self.shrinkfactor != 0:
             shrunk = self.rect.inflate(-self.rect.width*self.shrinkfactor,
                                        -self.rect.height*self.shrinkfactor)
@@ -752,13 +755,19 @@ class VGDLSprite(object):
             rounded = roundedPoints(shrunk)
             pygame.draw.polygon(screen, self.color, rounded)
             pygame.draw.lines(screen, LIGHTGREEN, True, rounded, 2)
+            label = myfont.render(str(self.hp), 1, (0,0,0))
+            screen.blit(label, self.rect)
             r = self.rect.copy()
         elif not self.is_static:
             rounded = roundedPoints(shrunk)
             pygame.draw.polygon(screen, self.color, rounded)
+            label = myfont.render(str(self.hp), 1, (0,0,0))
+            screen.blit(label, self.rect)
             r = self.rect.copy()
         else:
             r = screen.fill(self.color, shrunk)
+            label = myfont.render(str(self.hp), 1, (0,0,0))
+            screen.blit(label, self.rect)
         if self.resources:
             self._drawResources(game, screen, shrunk)
         VGDLSprite.dirtyrects.append(r)

@@ -273,6 +273,8 @@ class ShootNNSprite(SpriteProducer):
             group.pop('upbullet')
         if(group['downbullet'] != None):
             group.pop('downbullet')
+        if(group['boundary'] != None):
+            group.pop('boundary')
         for col in range(self.rect[0]/game.block_size - 2,self.rect[0]/game.block_size + 3,1):
             for row in range(self.rect[1]/game.block_size - 2,self.rect[1]/game.block_size + 3,1):
                 flag = False
@@ -447,45 +449,43 @@ class ShootNNSprite(SpriteProducer):
             outputs = fnn.activate(inputs)
         else:
             outputs = game.fnn.activate(inputs)
-        best = 0
-        bestoutput = outputs[0]
-        if(self.stype == "nothing"): 
-            for i in range(len(outputs)-4):
-                if outputs[i] > bestoutput:
-                    bestoutput = outputs[i]
-                    best = i
-        else:
-            for i in range(len(outputs)):
-                if outputs[i] > bestoutput:
-                    bestoutput = outputs[i]
-                    best = i
-        if(best >= 0 and best<=3):
-            if(self.ismove == 1):
-                self.physics.activeMovement(self, BASEDIRS[best])
-        else:
-            self.physics.activeMovement(self, (0,0))
-            if(self.stype == "sword" or self.stype == "wall"):
-                if(game.step - self.lastShoot >=self.scooldown):
-                    if(best == 4):
-                        game._createSprite([self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
-                    if(best == 5):
-                        game._createSprite([self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
-                    if(best == 6):
-                        game._createSprite([self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
-                    if(best == 7):
-                        game._createSprite([self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))
-                    self.lastShoot = game.step
-            if(self.stype == "bullet"):
-                if(game.step - self.lastShoot >=self.scooldown):
-                    if(best == 4):
-                        game._createSprite(['left'+self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
-                    if(best == 5):
-                        game._createSprite(['right'+self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
-                    if(best == 6):
-                        game._createSprite(['up'+self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
-                    if(best == 7):
-                        game._createSprite(['down'+self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))    
-                    self.lastShoot = game.step
+        bestmove = 0
+        bestmoveoutput = outputs[0]
+        for i in range(4):
+            if outputs[i] > bestmoveoutput:
+                bestmoveoutput = outputs[i]
+                bestmove = i
+        bestshoot = 0
+        bestshootoutput = outputs[4]
+        for i in range(4,8,1):
+            if outputs[i] > bestshootoutput:
+                bestshootoutput = outputs[i]
+                bestshoot = i
+        if(self.ismove == 1):
+            self.physics.activeMovement(self, BASEDIRS[bestmove])
+        self.physics.activeMovement(self, (0,0))
+        if(self.stype == "sword" or self.stype == "wall" or self.stype == "red" or self.stype == "green" or self.stype == "blue"):
+            if(game.step - self.lastShoot >=self.scooldown):
+                if(bestshoot == 4):
+                    game._createSprite([self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
+                if(bestshoot == 5):
+                    game._createSprite([self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
+                if(bestshoot == 6):
+                    game._createSprite([self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
+                if(bestshoot == 7):
+                    game._createSprite([self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))
+                self.lastShoot = game.step
+        if(self.stype == "bullet"):
+            if(game.step - self.lastShoot >=self.scooldown):
+                if(bestshoot == 4):
+                    game._createSprite(['left'+self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
+                if(bestshoot == 5):
+                    game._createSprite(['right'+self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
+                if(bestshoot == 6):
+                    game._createSprite(['up'+self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
+                if(bestshoot == 7):
+                    game._createSprite(['down'+self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))    
+                self.lastShoot = game.step
         game.step = game.step + 1
 class NNSprite(VGDLSprite):
     """ theSpriteControlledByNN. """
@@ -912,6 +912,99 @@ class AStarChaser(RandomNPC):
 #     Avatars: player-controlled sprite types
 # ---------------------------------------------------------------------
 from core import Avatar
+class NNAvatar(VGDLSprite, Avatar):
+    """ the Avatar which can sword and shoot """
+    color = WHITE
+    speed = 0.5
+    is_avatar = True
+    alternate_keys=False
+    lastshoot = -100
+    def declare_possible_actions(self):
+        from pygame.locals import K_LEFT, K_RIGHT, K_UP, K_DOWN
+        actions = {}
+        actions["UP"] = K_UP
+        actions["DOWN"] = K_DOWN
+        actions["LEFT"] = K_LEFT
+        actions["RIGHT"] = K_RIGHT
+        return actions
+
+    def _readAction(self, game):
+        actions = self._readMultiActions(game)
+        if actions:
+            return actions[0]
+        else:
+            return None
+
+    def _readMultiActions(self, game):
+        """ Read multiple simultaneously pressed button actions. """
+        from pygame.locals import K_RIGHT,K_LEFT,K_UP,K_DOWN,K_a, K_s, K_d, K_w
+        res = []
+        if self.stype == "sword" or self.stype == "wall" or self.stype == "red" or self.stype == "green" or self.stype == "blue":
+            if   game.keystate[K_d]:  
+                if self.ismove==1: res += [RIGHT]
+            elif game.keystate[K_a]:  
+                if self.ismove==1: res += [LEFT]
+            elif game.keystate[K_w]:  
+                if self.ismove==1: res += [UP]
+            elif game.keystate[K_s]:  
+                if self.ismove==1: res += [DOWN]
+            if game.keystate[K_RIGHT]: 
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite([self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
+            elif game.keystate[K_LEFT]:  
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite([self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
+            elif game.keystate[K_UP]: 
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time 
+                    game._createSprite([self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
+            elif game.keystate[K_DOWN]:  
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite([self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))
+        elif self.stype == "bullet":
+            if   game.keystate[K_d]:  
+                if self.ismove==1:res += [RIGHT]
+            elif game.keystate[K_a]:  
+                if self.ismove==1:res += [LEFT]
+            elif game.keystate[K_w]:  
+                if self.ismove==1:res += [UP]
+            elif game.keystate[K_s]:  
+                if self.ismove==1:res += [DOWN]
+            if game.keystate[K_RIGHT]: 
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite(['right'+self.stype], (self.rect[0] + 1 * game.block_size,self.rect[1]))
+            elif game.keystate[K_LEFT]:  
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite(['left'+self.stype], (self.rect[0] - 1 * game.block_size,self.rect[1]))
+            elif game.keystate[K_UP]:  
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite(['up'+self.stype], (self.rect[0],self.rect[1] - 1 * game.block_size))
+            elif game.keystate[K_DOWN]:  
+                if(game.time - self.lastshoot >= self.scooldown):
+                    self.lastshoot = game.time
+                    game._createSprite(['down'+self.stype], (self.rect[0],self.rect[1] + 1 * game.block_size))
+        else:
+            if game.keystate[K_d]:  
+                if self.ismove==1:res += [RIGHT]
+            elif game.keystate[K_a]:  
+                if self.ismove==1:res += [LEFT]
+            elif game.keystate[K_w]:  
+                if self.ismove==1:res += [UP]
+            elif game.keystate[K_s]:  
+                if self.ismove==1:res += [DOWN]
+        return res
+    def update(self, game):
+        VGDLSprite.update(self, game)
+        action = self._readAction(game)
+        if action:
+            self.physics.activeMovement(self, action)
+
 class MovingAvatar(VGDLSprite, Avatar):
     """ Default avatar, moves in the 4 cardinal directions. """
     color = WHITE
@@ -1187,17 +1280,16 @@ class Timeout(Termination):
         self.win = win
 
     def isDone(self, game):
-        """if(game.isSubjective == False):
+        if(game.isSubjective == False):
             if game.time >= self.limit:
                 return True, self.win
             else:
                 return False, None
         else:
-        """
-        if game.step >= self.limit:
-            return True, self.win
-        else:
-            return False, None
+            if game.step >= self.limit:
+                return True, self.win
+            else:
+                return False, None
 
 class Scoreout(Termination):
     def __init__(self, limit=0, win=False):
@@ -1481,8 +1573,8 @@ def teleportPartner(sprite, partner, game, score=0,sdam=10,pdam=10):
         randomY = int(random.uniform(0, game.height))
         flag = False
         for classes in group:
-            for sprite in group[classes]:
-                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+            for this_sprite in group[classes]:
+                if (this_sprite.rect[0] == randomX * game.block_size and this_sprite.rect[1] == randomY * game.block_size):
                         flag = True
         if(flag == False):
             break
@@ -1500,8 +1592,8 @@ def teleportSprite(sprite, partner, game, score=0,sdam=10,pdam=10):
         randomY = int(random.uniform(0, game.height))
         flag = False
         for classes in group:
-            for sprite in group[classes]:
-                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+            for this_sprite in group[classes]:
+                if (this_sprite.rect[0] == randomX * game.block_size and this_sprite.rect[1] == randomY * game.block_size):
                         flag = True
         if(flag == False):
             break
@@ -1519,8 +1611,8 @@ def teleportBoth(sprite, partner, game, score=0,sdam=10,pdam=10):
         randomY = int(random.uniform(0, game.height))
         flag = False
         for classes in group:
-            for sprite in group[classes]:
-                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+            for this_sprite in group[classes]:
+                if (this_sprite.rect[0] == randomX * game.block_size and this_sprite.rect[1] == randomY * game.block_size):
                         flag = True
         if(flag == False):
             break
@@ -1535,8 +1627,8 @@ def teleportBoth(sprite, partner, game, score=0,sdam=10,pdam=10):
         randomY = int(random.uniform(0, game.height))
         flag = False
         for classes in group:
-            for sprite in group[classes]:
-                if (sprite.rect[0] == randomX * game.block_size and sprite.rect[1] == randomY * game.block_size):
+            for this_sprite in group[classes]:
+                if (this_sprite.rect[0] == randomX * game.block_size and this_sprite.rect[1] == randomY * game.block_size):
                         flag = True
         if(flag == False):
             break
